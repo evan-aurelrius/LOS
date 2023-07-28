@@ -1,0 +1,55 @@
+image: python:3.11
+
+stages:
+  - build
+  - test
+  - sonarqube
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+cache:
+  paths:
+    - .cache/pip
+
+.django_migrations: &django_migrations |-
+  pip install -r requirements.txt
+  python manage.py makemigrations
+  python manage.py migrate
+
+build:
+  stage: build
+  script:
+    - *django_migrations
+
+test:
+  stage: test
+  artifacts:
+    paths:
+      - .coverage*
+      - coverage.xml
+    expire_in: 1 day
+  before_script:
+    - *django_migrations
+  script:
+    - coverage run --omit="manage.py,ppl_los/*,**/migrations/*.py,**/tests.py" ./manage.py test
+    - coverage xml -i
+    - coverage report
+  coverage: '/TOTAL.*\s+(\d+%)$/'
+
+sonarqube:
+  stage: sonarqube
+  image: 
+    name: sonarsource/sonar-scanner-cli:latest
+    entrypoint: [ "" ]
+  variables:
+    SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
+    GIT_DEPTH: "0"
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .sonar/cache
+  script: sonar-scanner -X -Dsonar.projectKey=$SONAR_PROJECT_KEY -Dsonar.sources=. -Dsonar.host.url=$SONAR_HOST_URL -Dsonar.login=$SONAR_TOKEN -Dsonar.exclusions=**/migrations/*.py -Dsonar.test.inclusions=**/tests.py -Dsonar.python.coverage.reportPaths=./coverage.xml -Dsonar.coverage.exclusions=manage.py,ppl_los/*,**/migrations/*.py -Dsonar.qualitygate.wait=true 
+  only:
+    - master
+    - staging
